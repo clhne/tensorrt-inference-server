@@ -30,7 +30,6 @@
 #include <cuda_runtime_api.h>
 #include <stdint.h>
 #include "src/core/constants.h"
-#include "src/core/dynamic_batch_scheduler.h"
 #include "src/core/logging.h"
 #include "src/core/model_config.h"
 #include "src/core/server_status.h"
@@ -159,14 +158,13 @@ NetDefBundle::CreateExecutionContexts(
 
   // Create a scheduler with one thread for each context available for
   // this model. Each runner is exclusively tied to the context.
-  std::unique_ptr<Scheduler> scheduler(new DynamicBatchScheduler(
-    Config(), total_context_cnt,
+  TF_RETURN_IF_ERROR(SetConfiguredScheduler(
+    total_context_cnt,
     [this](
       uint32_t runner_idx, std::vector<Scheduler::Payload>* payloads,
       std::function<void(tensorflow::Status)> func) {
       Run(runner_idx, payloads, func);
     }));
-  TF_RETURN_IF_ERROR(SetScheduler(std::move(scheduler)));
 
   LOG_VERBOSE(1) << "netdef bundle for " << Name() << std::endl << *this;
   return tensorflow::Status::OK();

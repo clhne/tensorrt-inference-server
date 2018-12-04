@@ -28,7 +28,9 @@
 
 #include <chrono>
 #include "src/core/constants.h"
+#include "src/core/dynamic_batch_scheduler.h"
 #include "src/core/logging.h"
+#include "src/core/stream_batch_scheduler.h"
 #include "src/core/utils.h"
 #include "tensorflow/core/lib/core/errors.h"
 
@@ -626,11 +628,28 @@ InferenceServable::SetScheduler(std::unique_ptr<Scheduler> scheduler)
 {
   if (scheduler_ != nullptr) {
     return tensorflow::errors::Internal(
-      "Attempt to change schedule not allowed");
+      "Attempt to change scheduler not allowed");
   }
 
   scheduler_ = std::move(scheduler);
   return tensorflow::Status::OK();
+}
+
+tensorflow::Status
+InferenceServable::SetConfiguredScheduler(
+  const uint32_t runner_cnt, Scheduler::StandardRunFunc OnRun)
+{
+  std::unique_ptr<Scheduler> scheduler;
+
+  // If 'stream_batching' is configured use the SteamBatchScheduler,
+  // otherwise use the default DynamicBatchScheduler.
+  if (config_.has_stream_batching()) {
+    scheduler.reset(new StreamBatchScheduler(config_, runner_cnt, OnRun));
+  } else {
+    scheduler.reset(new DynamicBatchScheduler(config_, runner_cnt, OnRun));
+  }
+
+  return SetScheduler(std::move(scheduler));
 }
 
 void

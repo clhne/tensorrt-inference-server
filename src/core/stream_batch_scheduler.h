@@ -25,43 +25,56 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include "src/core/model_config.pb.h"
+#include "src/core/scheduler.h"
+#include "tensorflow/core/lib/core/errors.h"
 
 namespace nvidia { namespace inferenceserver {
 
-using DimsList = ::google::protobuf::RepeatedField<::google::protobuf::int64>;
+// Scheduler that implements batching for stream inferences.
+class StreamBatchScheduler : public Scheduler {
+ public:
+  // Create a scheduler to support a given number of runners and a run
+  // function to call when a request is scheduled.
+  StreamBatchScheduler(
+    const ModelConfig& config, uint32_t runner_cnt, StandardRunFunc OnSchedule);
+  ~StreamBatchScheduler();
 
-// Enumeration for the different platform types
-enum Platform {
-  PLATFORM_UNKNOWN = 0,
-  PLATFORM_TENSORRT_PLAN = 1,
-  PLATFORM_TENSORFLOW_GRAPHDEF = 2,
-  PLATFORM_TENSORFLOW_SAVEDMODEL = 3,
-  PLATFORM_CAFFE2_NETDEF = 4
+  // \see Scheduler::Enqueue()
+  void Enqueue(
+    std::shared_ptr<ModelInferStats> stats,
+    std::shared_ptr<InferRequestProvider> request_provider,
+    std::shared_ptr<InferResponseProvider> response_provider,
+    std::function<void(tensorflow::Status)> OnComplete) override;
+
+ private:
+  void SchedulerThread(const uint32_t runner_id, const int nice);
+
+  // Function the scheduler will call to schedule a payload(s) for
+  // execution.
+  const StandardRunFunc OnSchedule_;
+
+  // The number of scheduler threads.
+  uint32_t scheduler_thread_cnt_;
+
+  // The number of scheduler threads currently idle.
+  uint32_t idle_scheduler_thread_cnt_;
+
+  // Mutex and condvar protecting the scheduling queue.
+  std::mutex mu_;
+  std::condition_variable cv_;
+
+  // Queue holding inference requests for the model represented by
+  // this servable.
+  std::deque<Scheduler::Payload> queue_;
+
+  std::vector<std::unique_ptr<std::thread>> scheduler_threads_;
+  std::atomic<bool> scheduler_threads_exit_;
 };
-
-// Get the size of a datatype in bytes. Return 0 if unable to
-// determine the size of the data type.
-size_t GetDataTypeByteSize(const DataType dtype);
-
-// Get the size of a tensor based on datatype and dimensions. Return 0
-// if unable to determine the size of the data type.
-uint64_t GetSize(const DataType& dtype, const DimsList& dims);
-
-// Get the size of a tensor based on ModelInput. Return 0 if unable to
-// determine the size of the data type.
-uint64_t GetSize(const ModelInput& mio);
-
-// Get the size of a tensor based on ModelOutput. Return 0 if unable
-// to determine the size of the data type.
-uint64_t GetSize(const ModelOutput& mio);
-
-// Get the Platform value for a platform string or Platform::UNKNOWN
-// if the platform string is not recognized.
-Platform GetPlatform(const std::string& platform_str);
-
-// Get the CPU thread nice level associate with a model configurations
-// priority.
-int GetPriorityNiceLevel(const ModelConfig& config);
 
 }}  // namespace nvidia::inferenceserver

@@ -293,8 +293,14 @@ class InferenceServable {
   tensorflow::Status SetModelConfig(
     const tensorflow::StringPiece& path, const ModelConfig& config);
 
-  // Set the scheduler to use for inference requests to the model.
+  // Explicitly set the scheduler to use for inference requests to the
+  // model. The scheduler can only be set once for a servable.
   tensorflow::Status SetScheduler(std::unique_ptr<Scheduler> scheduler);
+
+  // Set the scheduler based on the model configuration. The scheduler
+  // can only be set once for a servable.
+  tensorflow::Status SetConfiguredScheduler(
+    const uint32_t runner_cnt, Scheduler::StandardRunFunc OnRun);
 
  private:
   // Configuration of the model that this servable represents.

@@ -113,4 +113,25 @@ GetPlatform(const std::string& platform_str)
   return Platform::PLATFORM_UNKNOWN;
 }
 
+int
+GetPriorityNiceLevel(const ModelConfig& config)
+{
+  int nice = SCHEDULER_DEFAULT_NICE;
+  if (config.has_optimization()) {
+    switch (config.optimization().priority()) {
+      case ModelOptimizationPolicy::PRIORITY_MAX:
+        nice = 0;
+        break;
+      case ModelOptimizationPolicy::PRIORITY_MIN:
+        nice = 19;
+        break;
+      default:
+        nice = SCHEDULER_DEFAULT_NICE;
+        break;
+    }
+  }
+
+  return nice;
+}
+
 }}  // namespace nvidia::inferenceserver

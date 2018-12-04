@@ -65,6 +65,19 @@ class Scheduler {
     tensorflow::Status compute_status_;
   };
 
+  // The prototype for the run function that will be called by the
+  // "standard" schedulers created based on a model's
+  // scheduling_choice settings. The run function must accept a
+  // 'runner_idx' indicating which runner should execute the
+  // 'payloads'. When the execution completes the runner must call the
+  // 'OnRunComplete' function with error status. A non-OK error status
+  // indicates an internal error that prevents any of the of
+  // 'payloads' requests from completing. If an error is isolated to a
+  // single request in 'payloads' it will be reported in that payload.
+  using StandardRunFunc = std::function<void(
+    uint32_t runner_idx, std::vector<Payload>* payloads,
+    std::function<void(tensorflow::Status)> OnRunComplete)>;
+
   // Enqueue a request with the scheduler.
   virtual void Enqueue(
     std::shared_ptr<ModelInferStats> stats,

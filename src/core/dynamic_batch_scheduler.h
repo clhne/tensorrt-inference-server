@@ -39,22 +39,10 @@ namespace nvidia { namespace inferenceserver {
 // Scheduler that implements dynamic batching.
 class DynamicBatchScheduler : public Scheduler {
  public:
-  // The prototype for the run function that will be called by the
-  // scheduler to run a request. The run function must accept a
-  // 'runner_idx' indicating which runner should execute the
-  // 'payloads'. When the execution completes the runner must call the
-  // 'OnRunComplete' function with error status. A non-OK error status
-  // indicates an internal error that prevents any of the of
-  // 'payloads' requests from completing. If an error is isolated to a
-  // single request in 'payloads' it will be reported in that payload.
-  using RunFunc = std::function<void(
-    uint32_t runner_idx, std::vector<Scheduler::Payload>* payloads,
-    std::function<void(tensorflow::Status)> OnRunComplete)>;
-
   // Create a scheduler to support a given number of runners and a run
   // function to call when a request is scheduled.
   DynamicBatchScheduler(
-    const ModelConfig& config, uint32_t runner_cnt, RunFunc OnSchedule);
+    const ModelConfig& config, uint32_t runner_cnt, StandardRunFunc OnSchedule);
   ~DynamicBatchScheduler();
 
   // \see Scheduler::Enqueue()
@@ -70,7 +58,7 @@ class DynamicBatchScheduler : public Scheduler {
 
   // Function the scheduler will call to schedule a payload(s) for
   // execution.
-  const RunFunc OnSchedule_;
+  const StandardRunFunc OnSchedule_;
 
   // The number of scheduler threads.
   uint32_t scheduler_thread_cnt_;
