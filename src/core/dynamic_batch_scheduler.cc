@@ -40,7 +40,8 @@
 namespace nvidia { namespace inferenceserver {
 
 DynamicBatchScheduler::DynamicBatchScheduler(
-  const ModelConfig& config, uint32_t runner_cnt, StandardRunFunc OnSchedule)
+  const ModelConfig& config, const uint32_t runner_cnt,
+  StandardRunFunc OnSchedule)
     : OnSchedule_(OnSchedule), scheduler_thread_cnt_(runner_cnt),
       idle_scheduler_thread_cnt_(0), pending_batch_size_(0),
       pending_batch_queue_cnt_(0)
@@ -88,9 +89,9 @@ DynamicBatchScheduler::~DynamicBatchScheduler()
 
 void
 DynamicBatchScheduler::Enqueue(
-  std::shared_ptr<ModelInferStats> stats,
-  std::shared_ptr<InferRequestProvider> request_provider,
-  std::shared_ptr<InferResponseProvider> response_provider,
+  const std::shared_ptr<ModelInferStats>& stats,
+  const std::shared_ptr<InferRequestProvider>& request_provider,
+  const std::shared_ptr<InferResponseProvider>& response_provider,
   std::function<void(tensorflow::Status)> OnComplete)
 {
   struct timespec now;
@@ -310,7 +311,7 @@ DynamicBatchScheduler::GetDynamicBatch()
   // a thread to check again at the maximum allowed delay.
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
-  struct timespec& queued = queue_.front().queued_timestamp_;
+  const struct timespec& queued = queue_.front().queued_timestamp_;
   uint64_t delay_ns = (now.tv_sec * NANOS_PER_SECOND + now.tv_nsec) -
                       (queued.tv_sec * NANOS_PER_SECOND + queued.tv_nsec);
 

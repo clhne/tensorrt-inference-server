@@ -43,10 +43,11 @@ class Scheduler {
     Payload() = default;
     Payload(const Payload& payload) = default;
     Payload(
-      struct timespec queued_timestamp, std::shared_ptr<ModelInferStats> stats,
-      std::shared_ptr<InferRequestProvider> request_provider,
-      std::shared_ptr<InferResponseProvider> response_provider,
-      std::function<void(tensorflow::Status)> complete_function)
+      const struct timespec queued_timestamp,
+      const std::shared_ptr<ModelInferStats>& stats,
+      const std::shared_ptr<InferRequestProvider>& request_provider,
+      const std::shared_ptr<InferResponseProvider>& response_provider,
+      const std::function<void(tensorflow::Status)> complete_function)
         : queued_timestamp_(queued_timestamp), stats_(stats),
           request_provider_(request_provider),
           response_provider_(response_provider),
@@ -56,7 +57,7 @@ class Scheduler {
     {
     }
 
-    struct timespec queued_timestamp_;
+    const struct timespec queued_timestamp_;
     std::shared_ptr<ModelInferStats> stats_;
     std::shared_ptr<InferRequestProvider> request_provider_;
     std::shared_ptr<InferResponseProvider> response_provider_;
@@ -80,9 +81,9 @@ class Scheduler {
 
   // Enqueue a request with the scheduler.
   virtual void Enqueue(
-    std::shared_ptr<ModelInferStats> stats,
-    std::shared_ptr<InferRequestProvider> request_provider,
-    std::shared_ptr<InferResponseProvider> response_provider,
+    const std::shared_ptr<ModelInferStats>& stats,
+    const std::shared_ptr<InferRequestProvider>& request_provider,
+    const std::shared_ptr<InferResponseProvider>& response_provider,
     std::function<void(tensorflow::Status)> OnComplete) = 0;
 };
 

@@ -25,9 +25,14 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <stdint.h>
 #include "src/core/model_config.pb.h"
 
 namespace nvidia { namespace inferenceserver {
+
+// The type for the stream_id in an inference request. This must match
+// the protobuf type used in InferRequestHeader.stream_id.
+using StreamID = uint64_t;
 
 using DimsList = ::google::protobuf::RepeatedField<::google::protobuf::int64>;
 

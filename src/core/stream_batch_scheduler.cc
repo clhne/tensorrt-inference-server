@@ -28,30 +28,34 @@
 
 #include <sys/resource.h>
 #include <sys/syscall.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include "src/core/constants.h"
 #include "src/core/infer.h"
 #include "src/core/logging.h"
-#include "src/core/model_config.h"
 #include "src/core/server_status.h"
 
 namespace nvidia { namespace inferenceserver {
 
 StreamBatchScheduler::StreamBatchScheduler(
-  const ModelConfig& config, uint32_t runner_cnt, StandardRunFunc OnSchedule)
+  const ModelConfig& config, const uint32_t runner_cnt,
+  StandardRunFunc OnSchedule)
     : OnSchedule_(OnSchedule), scheduler_thread_cnt_(runner_cnt),
-      idle_scheduler_thread_cnt_(0)
+      max_batch_size_(config.max_batch_size()), idle_scheduler_thread_cnt_(0)
 {
   scheduler_threads_exit_.store(false);
 
   // Create one scheduler thread for each requested runner. Associate
-  // each scheduler thread with a runner.
+  // each scheduler thread with a runner. Also create and associate a
+  // StreamBatch object with each thread that manages the queues of
+  // requests for that thread.
   const int nice = GetPriorityNiceLevel(config);
   for (uint32_t c = 0; c < scheduler_thread_cnt_; ++c) {
+    std::shared_ptr<StreamBatch> sb =
+      std::make_shared<StreamBatch>(max_batch_size_);
+    batches_.push_back(sb);
     scheduler_threads_.emplace_back(
-      new std::thread([this, c, nice]() { SchedulerThread(c, nice); }));
+      new std::thread([this, sb, c, nice]() { SchedulerThread(sb, c, nice); }));
   }
 }
 
@@ -71,33 +75,78 @@ StreamBatchScheduler::~StreamBatchScheduler()
 
 void
 StreamBatchScheduler::Enqueue(
-  std::shared_ptr<ModelInferStats> stats,
-  std::shared_ptr<InferRequestProvider> request_provider,
-  std::shared_ptr<InferResponseProvider> response_provider,
+  const std::shared_ptr<ModelInferStats>& stats,
+  const std::shared_ptr<InferRequestProvider>& request_provider,
+  const std::shared_ptr<InferResponseProvider>& response_provider,
   std::function<void(tensorflow::Status)> OnComplete)
 {
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
 
-  bool wake_runner = false;
-  {
-    std::lock_guard<std::mutex> lock(mu_);
-    queue_.emplace_back(
+  const auto& request_header = request_provider->RequestHeader();
+  const StreamID stream_id = request_header.stream_id();
+
+  // A request must have a stream ID to be processed correctly by this
+  // scheduler. A value of 0 (zero) indicates that the request doesn't
+  // have a stream ID.
+  if (stream_id == 0) {
+    OnComplete(tensorflow::errors::InvalidArgument(
+      "inference request to model '", request_provider->ModelName(),
+      "' must specify a stream ID"));
+    return;
+  }
+
+  StreamTarget* target = nullptr;
+
+  std::unique_lock<std::mutex> lock(mu_);
+
+  // If the request's stream_id is new, then attempt to find a free
+  // slot to use for that stream. If one doesn't exist then put the
+  // request onto the backlog queue where it must wait for a slot to
+  // come free. If a free slot is found assign this and subsequent
+  // requests in this stream to that StreamBatch+slot.
+  auto sb_itr = stream_to_target_map_.find(stream_id);
+  if (sb_itr == stream_to_target_map_.end()) {
+    bool found_slot = false;
+    std::shared_ptr<StreamBatch> isb;
+    uint32_t islot;
+    for (const std::shared_ptr<StreamBatch>& bsb : batches_) {
+      found_slot = bsb->GetFreeSlot(&islot);
+      if (found_slot) {
+        isb = bsb;
+        break;
+      }
+    }
+
+    target = &stream_to_target_map_[stream_id];
+    if (found_slot) {
+      target->stream_batch_ = isb;
+      target->slot_ = islot;
+    } else {
+      backlog_stream_ids_.push_back(stream_id);
+    }
+  } else {
+    target = &sb_itr->second;
+  }
+
+  if (target->IsBacklog()) {
+    target->backlog_.emplace_back(
       now, stats, request_provider, response_provider, OnComplete);
-
-    // If there are any idle runners then wake one up to service this
-    // request. We do the actual wake outside of the lock to avoid
-    // having the woken thread immediately block on the lock
-    wake_runner = (idle_scheduler_thread_cnt_ > 0);
+    return;
   }
 
-  if (wake_runner) {
-    cv_.notify_one();
-  }
+  std::shared_ptr<StreamBatch> sb = target->stream_batch_;
+  uint32_t slot = target->slot_;
+
+  lock.unlock();
+
+  sb->Enqueue(
+    slot, now, stats, request_provider, response_provider, OnComplete);
 }
 
 void
-StreamBatchScheduler::SchedulerThread(const uint32_t runner_id, const int nice)
+StreamBatchScheduler::SchedulerThread(
+  std::shared_ptr<StreamBatch> sb, const uint32_t runner_id, const int nice)
 {
   if (setpriority(PRIO_PROCESS, syscall(SYS_gettid), nice) == 0) {
     LOG_VERBOSE(1) << "Starting stream-batch scheduler thread " << runner_id
@@ -122,10 +171,10 @@ StreamBatchScheduler::SchedulerThread(const uint32_t runner_id, const int nice)
 
   while (!scheduler_threads_exit_.load()) {
     std::shared_ptr<std::vector<Scheduler::Payload>> payloads;
-    bool wake_thread = false;
     uint64_t wait_microseconds = 0;
 
-    // Hold the lock for as short a time as possible.
+// Hold the lock for as short a time as possible.
+#if 0
     {
       std::unique_lock<std::mutex> lock(mu_);
       if (delay_cnt > 0) {
@@ -152,10 +201,7 @@ StreamBatchScheduler::SchedulerThread(const uint32_t runner_id, const int nice)
         idle_scheduler_thread_cnt_--;
       }
     }
-
-    if (wake_thread) {
-      cv_.notify_one();
-    }
+#endif
 
     if ((payloads != nullptr) && !payloads->empty()) {
       auto OnCompleteQueuedPayloads = [payloads](tensorflow::Status status) {
@@ -183,6 +229,28 @@ StreamBatchScheduler::SchedulerThread(const uint32_t runner_id, const int nice)
 
   LOG_VERBOSE(1) << "Stopping stream-batch scheduler thread " << runner_id
                  << "...";
+}
+
+StreamBatchScheduler::StreamBatch::StreamBatch(uint32_t max_batch_size)
+    : max_batch_size_(max_batch_size), queues_(max_batch_size)
+{
+}
+
+bool
+StreamBatchScheduler::StreamBatch::GetFreeSlot(uint32_t* slot)
+{
+  std::unique_lock<std::mutex> lock(mu_);
+
+  // FIXME, empty queue doesn't mean it is free!!!
+
+  for (size_t i = 0; i < queues_.size(); ++i) {
+    if (queues_[i].empty()) {
+      *slot = i;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }}  // namespace nvidia::inferenceserver

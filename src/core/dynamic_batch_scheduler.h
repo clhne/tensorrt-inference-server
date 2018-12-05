@@ -42,14 +42,15 @@ class DynamicBatchScheduler : public Scheduler {
   // Create a scheduler to support a given number of runners and a run
   // function to call when a request is scheduled.
   DynamicBatchScheduler(
-    const ModelConfig& config, uint32_t runner_cnt, StandardRunFunc OnSchedule);
+    const ModelConfig& config, const uint32_t runner_cnt,
+    StandardRunFunc OnSchedule);
   ~DynamicBatchScheduler();
 
   // \see Scheduler::Enqueue()
   void Enqueue(
-    std::shared_ptr<ModelInferStats> stats,
-    std::shared_ptr<InferRequestProvider> request_provider,
-    std::shared_ptr<InferResponseProvider> response_provider,
+    const std::shared_ptr<ModelInferStats>& stats,
+    const std::shared_ptr<InferRequestProvider>& request_provider,
+    const std::shared_ptr<InferResponseProvider>& response_provider,
     std::function<void(tensorflow::Status)> OnComplete) override;
 
  private:
@@ -61,7 +62,7 @@ class DynamicBatchScheduler : public Scheduler {
   const StandardRunFunc OnSchedule_;
 
   // The number of scheduler threads.
-  uint32_t scheduler_thread_cnt_;
+  const uint32_t scheduler_thread_cnt_;
 
   // The number of scheduler threads currently idle.
   uint32_t idle_scheduler_thread_cnt_;
